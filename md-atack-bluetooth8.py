@@ -24,7 +24,7 @@ def check_installation():
 def print_banner():
     print("**********************************************************")
     print("*                   Creado por midesmis                  *")
-    print("*                  md-bluatack v1.0                      *")
+    print("*                  md-bluatack v8.0                      *")
     print("*     Úsese con responsabilidad en entornos controlados  *")
     print("**********************************************************")
 
