@@ -31,7 +31,6 @@ Si no están instalados, la herramienta los verificará y te pedirá instalarlos
 ### Instalación del repositorio
 
 ```bash
-git clone https://github.com/tu-usuario/md-attack-bluetooth.git
 cd md-attack-bluetooth
 
 Uso
